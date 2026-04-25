@@ -1,0 +1,10 @@
+◇ injected env (2) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+[Server] 预加载 SKILL...
+[Skill] Loaded: yujun (6842 chars)
+[Skill] Loaded: jobs (11410 chars)
+[Skill] Loaded: musk (8750 chars)
+[Skill] Loaded: ma (9667 chars)
+[Skill] Loaded: zhang (8851 chars)
+[Skill] Loaded: jiaoyuan (9187 chars)
+[Server] http://localhost:3001
+[SDK] @anthropic-ai/sdk
