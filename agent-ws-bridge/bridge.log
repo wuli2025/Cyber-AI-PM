@@ -1,0 +1,11 @@
+
+=== agent-ws-bridge started ===
+HTTP API: http://localhost:3011
+Backend:  http://localhost:3001
+
+[Skill] Loaded: jobs (11410 chars)
+[Skill] Loaded: musk (8750 chars)
+[Skill] Loaded: ma (9667 chars)
+[Skill] Loaded: zhang (8851 chars)
+[Skill] Loaded: yujun (6842 chars)
+[Skill] Loaded: jiaoyuan (9187 chars)

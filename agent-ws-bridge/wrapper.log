@@ -1,0 +1,12 @@
+file:///D:/ai%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86/agent-ws-bridge/bridge-wrapper.js:1
+const { spawn } = require('child_process');
+                  ^
+
+ReferenceError: require is not defined in ES module scope, you can use import instead
+This file is being treated as an ES module because it has a '.js' file extension and 'D:\ai产品经理\agent-ws-bridge\package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+    at file:///D:/ai%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86/agent-ws-bridge/bridge-wrapper.js:1:19
+    at ModuleJob.run (node:internal/modules/esm/module_job:413:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:660:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.13.0

@@ -1,0 +1,42 @@
+
+=== agent-ws-bridge started ===
+HTTP API: http://localhost:3011
+Backend:  http://localhost:3001
+
+[Skill] Loaded: jobs (11410 chars)
+[Skill] Loaded: musk (8750 chars)
+[Skill] Loaded: ma (9667 chars)
+[Skill] Loaded: zhang (8851 chars)
+[Skill] Loaded: yujun (6842 chars)
+[Skill] Loaded: jiaoyuan (9187 chars)
+[HTTP] GET /health
+[HTTP] POST /api/chat
+[Chat req_1777044550713] persona=musk, mode=undefined
+[HTTP] POST /api/chat
+[Chat req_1777044598169] persona=yujun, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777044606170] persona=jobs, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777044624090] persona=jobs, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777044861816] persona=jobs, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777044899048] persona=jobs, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777044975089] persona=ma, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045005447] persona=ma, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045027309] persona=ma, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045075519] persona=zhang, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045232594] persona=zhang, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045446699] persona=ma, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045504829] persona=ma, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045632153] persona=yujun, mode=fast
+[HTTP] POST /api/chat
+[Chat req_1777045653003] persona=yujun, mode=fast
