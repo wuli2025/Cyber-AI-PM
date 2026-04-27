@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "ansi-to-html": "^0.7.2",
+    "dotenv": "^17.4.2",
+    "node-pty": "^1.1.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "agent-ws": "^1.0.4"
+  }
+}

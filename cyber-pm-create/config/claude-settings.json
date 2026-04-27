@@ -1,0 +1,26 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-cp-Ef0R4jwN3gfdb36oKiziix6rs69PaSzBB4Ruow-MTomT6xtl0KLbC6SGcFboB4Zq-lXYlKf0gaHcqYTVGGyE-MLhzJu2uzzkm8G-gncwYxBFdpJJXm-eKfY",
+    "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2.7-highspeed",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "MiniMax-M2.7-highspeed",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMax-M2.7-highspeed",
+    "ANTHROPIC_MODEL": "MiniMax-M2.7-highspeed",
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "model": "MiniMax-M2.7-highspeed",
+  "permission-mode": "bypassPermissions",
+  "base_url": "https://api.minimaxi.com/anthropic",
+  "mcpServers": {
+    "bing-search": {
+      "command": "bing-cn-mcp",
+      "enabled": true
+    },
+    "rednote": {
+      "command": "rednote-mcp",
+      "args": ["--stdio"],
+      "enabled": true
+    }
+  }
+}

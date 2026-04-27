@@ -1,0 +1,413 @@
+/**
+ * AI产品思维实验室 - Minimax API 后端
+ * 使用 OpenAI SDK (兼容 Minimax)
+ * 支持 SYSTEM PROMPT 人格切换
+ * 优化：SSE 心跳 + 错误处理增强
+ */
+
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+const OpenAI = require('openai');
+const path = require('path');
+const fs = require('fs');
+
+// 引入认证模块
+const authRouter = require('./auth');
+const { authMiddleware } = require('./auth');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// SSE 心跳间隔 (毫秒)
+const HEARTBEAT_INTERVAL = 25000;
+
+// 强制从 .env 读取，覆盖系统环境变量
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf-8');
+  envContent.split('\n').forEach(line => {
+    const [key, ...valueParts] = line.split('=');
+    if (key && valueParts.length > 0) {
+      const value = valueParts.join('=').trim();
+      if (value) {
+        process.env[key] = value; // 强制覆盖
+      }
+    }
+  });
+}
+
+// Minimax / OpenAI 兼容 SDK 配置
+const API_KEY = process.env.ANTHROPIC_API_KEY;
+const BASE_URL = process.env.ANTHROPIC_BASE_URL || 'https://api.minimax.chat/v1';
+const MODEL = process.env.ANTHROPIC_MODEL || 'MiniMax-M2.5';
+
+const openai = new OpenAI({
+  apiKey: API_KEY,
+  baseURL: BASE_URL,
+});
+
+console.log('[Backend] Mode: Minimax API');
+console.log('[Backend] API:', BASE_URL);
+console.log('[Backend] Model:', MODEL);
+
+// ============ 认证路由 ============
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:8080', 'http://localhost:5173', 'http://localhost:3010', 'http://localhost:3001'],
+  credentials: true,
+}));
+
+app.use(express.json({ limit: '10mb' }));
+
+app.use('/api/auth', authRouter);
+
+// ============ System Prompt 加载 ============
+
+const SYSTEM_PROMPTS_PATH = path.join(process.env.SKILL_BASE_PATH || 'D:/ai产品经理', 'systemprompt');
+
+// System Prompt 文件名映射
+const PROMPT_FILES = {
+  'yujun': '俞军.md',
+  'jobs': '乔布斯.md',
+  'musk': '马斯克.md',
+  'ma': '马化腾.md',
+  'zhang': '张一鸣.md',
+  'jiaoyuan': '毛泽东.md',
+  'default': '默认.md'
+};
+
+const PERSONA_NAMES = {
+  'yujun': '俞军',
+  'jobs': '乔布斯',
+  'musk': '马斯克',
+  'ma': '马化腾',
+  'zhang': '张一鸣',
+  'jiaoyuan': '毛主席',
+  'default': '默认模式'
+};
+
+const THINKING_PROMPTS = {
+  quick: `【Quick 快速回答模式】
+最低思考深度，极简处理问题，跳过多余内部推演。
+回答极度精简、直击要点、拒绝长篇铺垫与额外拓展。`,
+
+  pro: `【Pro 深度推理模式】
+中等标准思考深度，完整逻辑闭环推导，严谨稳妥、兼顾效率与质量。`,
+
+  deep: `【Deep 链式思考模式】
+最高满格思考深度，强制全程思维链CoT深度拆解，层层递进分析。极致严谨穷尽推理。`,
+
+  fast: `【Fast 极速模式】
+立即响应，减少思考时间，简洁有力。`,
+
+  standard: `【Standard 标准模式】
+均衡响应，适度思考，完整但不过度。`
+};
+
+// System Prompt 缓存
+const promptCache = new Map();
+
+function loadSystemPrompt(personaId) {
+  if (promptCache.has(personaId)) {
+    return promptCache.get(personaId);
+  }
+
+  const fileName = PROMPT_FILES[personaId];
+  if (!fileName) return null;
+
+  const promptPath = path.join(SYSTEM_PROMPTS_PATH, fileName);
+
+  if (!fs.existsSync(promptPath)) {
+    console.log(`[System Prompt] Not found: ${promptPath}`);
+    return null;
+  }
+
+  try {
+    const content = fs.readFileSync(promptPath, 'utf-8');
+    promptCache.set(personaId, content);
+    console.log(`[System Prompt] Loaded: ${personaId} (${content.length} chars)`);
+    return content;
+  } catch (e) {
+    console.error(`[System Prompt] Error:`, e.message);
+    return null;
+  }
+}
+
+function buildSystemPrompt(personaId, mode) {
+  const parts = [];
+
+  // 思考模式
+  const thinkingPrompt = THINKING_PROMPTS[mode] || THINKING_PROMPTS.pro;
+  parts.push(thinkingPrompt);
+
+  // System Prompt 内容（人格框架）
+  const systemPrompt = loadSystemPrompt(personaId);
+  if (systemPrompt) {
+    parts.push('\n\n' + systemPrompt);
+  }
+
+  // 规则
+  const personaName = PERSONA_NAMES[personaId] || personaId || '默认模式';
+  parts.push(`\n---\n\n【重要规则】
+1. 直接以${personaName}的身份回应，不要说"作为AI"、"作为一个语言模型"等。
+2. 保持${personaName}的说话风格和思维模式。
+3. 遇到产品决策问题，先用该人格的框架分析，再给结论。
+4. 【关键】当前环境没有 WebSearch、search、工具调用等任何外部工具。绝对不要输出 [TOOL_CALL]、<invoke>、<function_calls> 之类的工具调用代码。所有分析必须基于你已有的知识和该人格的方法论框架，直接给出完整答案。
+5. 用户要求写 PRD 时，直接基于已知信息和人格框架，输出完整的 PRD 内容（市场判断、竞品定位、目标用户、功能规划、商业模式、风险等），不要说"正在搜索"、"扫描中"、"让我先看看"，直接给出结果。
+6. 必须输出完整的回答，不要中途停下来等待工具结果。`);
+
+  return parts.join('\n');
+}
+
+// 预加载所有 System Prompt
+console.log('[Server] 预加载 System Prompts...');
+Object.keys(PROMPT_FILES).forEach(id => loadSystemPrompt(id));
+
+// ============ SSE 辅助函数 ============
+
+function setupSSEHeaders(res) {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  // 防止 HTTP 缓存
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+}
+
+function sendSSEMessage(res, data) {
+  if (res.writableEnded) return false;
+  try {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    return true;
+  } catch (e) {
+    console.error('[SSE] Write error:', e.message);
+    return false;
+  }
+}
+
+function sendHeartbeat(res) {
+  if (res.writableEnded) return false;
+  try {
+    res.write(': heartbeat\n\n');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ============ API ============
+
+app.get('/api/personas', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.json([
+    { id: 'yujun', name: '俞军', avatar: '俞', color: '#0D5B4A', title: '中国产品经理教父' },
+    { id: 'jobs', name: '乔布斯', avatar: '乔', color: '#C41E3A', title: '交互与美学偏执者' },
+    { id: 'musk', name: '马斯克', avatar: '马', color: '#1E90FF', title: '第一性原理践行者' },
+    { id: 'ma', name: '马化腾', avatar: '化', color: '#2E6BE6', title: '社交产品之王' },
+    { id: 'zhang', name: '张一鸣', avatar: '鸣', color: '#E67E22', title: '推荐算法极致者' },
+    { id: 'jiaoyuan', name: '毛主席', avatar: '毛', color: '#B22234', title: '战略思维大师' },
+    { id: 'default', name: '默认', avatar: '默', color: '#666666', title: '标准 Claude 响应' }
+  ]);
+});
+
+// 健康检查（无需登录）
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    engine: 'minimax-api',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.post('/api/chat', async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const { message, persona_id = 'default', mode = 'pro', history = [] } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ error: 'message is required' });
+  }
+
+  console.log(`[${requestId}] Chat start: persona=${persona_id}, mode=${mode}`);
+
+  // 设置 SSE headers
+  setupSSEHeaders(res);
+
+  // 发送连接成功消息
+  sendSSEMessage(res, { type: 'connected', requestId });
+
+  // 创建心跳定时器
+  const heartbeatTimer = setInterval(() => {
+    if (!sendHeartbeat(res)) {
+      clearInterval(heartbeatTimer);
+    }
+  }, HEARTBEAT_INTERVAL);
+
+  // 响应结束时清理
+  res.on('close', () => {
+    console.log(`[${requestId}] Connection closed`);
+    clearInterval(heartbeatTimer);
+  });
+
+  res.on('error', (err) => {
+    console.error(`[${requestId}] Response error:`, err.message);
+    clearInterval(heartbeatTimer);
+  });
+
+  try {
+    // 构建系统提示词（包含 skill 内容）
+    const systemPrompt = buildSystemPrompt(persona_id, mode);
+    console.log(`[${requestId}] System prompt length: ${systemPrompt.length} chars`);
+
+    // 构建消息历史 + 当前消息
+    const messages = [];
+
+    // 添加历史消息
+    if (Array.isArray(history) && history.length > 0) {
+      for (const msg of history.slice(-10)) {
+        if (msg.role && msg.content) {
+          messages.push({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content
+          });
+        }
+      }
+    }
+
+    // 添加当前用户消息
+    messages.push({
+      role: 'user',
+      content: message
+    });
+
+    const stream = await openai.chat.completions.create({
+      model: MODEL,
+      max_tokens: 4096,
+      temperature: 0.7,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...messages
+      ],
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      if (res.writableEnded) break;
+
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        sendSSEMessage(res, {
+          type: 'chunk',
+          content: content,
+          requestId
+        });
+      }
+    }
+
+    // 发送完成消息
+    sendSSEMessage(res, { type: 'done', requestId });
+    console.log(`[${requestId}] Chat complete`);
+
+  } catch (error) {
+    console.error(`[${requestId}] Minimax API Error:`, error.message);
+    sendSSEMessage(res, {
+      type: 'error',
+      error: error.message || '请求失败，请重试',
+      requestId
+    });
+  } finally {
+    clearInterval(heartbeatTimer);
+    if (!res.writableEnded) {
+      res.end();
+    }
+  }
+});
+
+// 前端运行时配置（前后端分离：前端不硬编码，从这里获取）
+app.get('/api/config', (req, res) => {
+  res.json({
+    wsURL: process.env.WS_URL || 'ws://localhost:9999',
+    wsToken: process.env.WS_TOKEN || '',
+    useClaudeCode: process.env.USE_CLAUDE_CODE !== 'false',
+    useSkillMode: process.env.USE_SKILL_MODE !== 'false',
+    defaultMode: process.env.DEFAULT_MODE || 'pro',
+    defaultPersona: process.env.DEFAULT_PERSONA || 'yujun',
+    personaToSkill: {
+      'yujun': 'yu-jun-pm',
+      'jobs': 'steve-jobs-perspective',
+      'musk': 'elon-musk-perspective',
+      'ma': 'pony-ma-pm',
+      'zhang': 'openclaw-product-blueprint',
+      'jiaoyuan': 'mao-ze-dong-pm',
+      'default': null
+    }
+  });
+});
+
+// 提供 system prompt 给前端（用于 WebSocket → Claude Code 模式）
+app.get('/api/system-prompt', (req, res) => {
+  const personaId = req.query.id || 'default';
+  const content = loadSystemPrompt(personaId);
+  if (!content) {
+    return res.status(404).json({ error: `system prompt not found for ${personaId}` });
+  }
+  // 加上人格切换硬规则
+  const personaName = PERSONA_NAMES[personaId] || personaId || '默认模式';
+  const fullPrompt = content + `\n\n---\n\n【重要规则】
+1. 直接以${personaName}的身份回应，不要说"作为AI"、"作为一个语言模型"等。
+2. 保持${personaName}的说话风格和思维模式。
+3. 遇到产品决策问题，先用该人格的框架分析，再给结论。`;
+  res.json({ persona_id: personaId, persona_name: personaName, content: fullPrompt });
+});
+
+// ============ 登录页面 ============
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'login.html'));
+});
+
+// ============ 静态文件：serve 前端 ============
+const FRONTEND_PATH = process.env.FRONTEND_PATH || path.join(__dirname, '..', 'Kimi_Agent_Deployment_v11');
+if (fs.existsSync(FRONTEND_PATH)) {
+  app.use(express.static(FRONTEND_PATH));
+  // SPA 路由回退：所有非 API 请求都返回 index.html
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api/')) {
+      res.sendFile(path.join(FRONTEND_PATH, 'index.html'));
+    }
+  });
+  console.log(`[Server] 前端静态文件: ${FRONTEND_PATH}`);
+} else {
+  console.warn(`[Server] 前端目录不存在: ${FRONTEND_PATH}`);
+}
+
+// ============ 启动 ============
+
+app.listen(PORT, () => {
+  console.log(`
+╔════════════════════════════════════════════════╗
+║         Backend Server Started                 ║
+╠════════════════════════════════════════════════╣
+║  HTTP API:     http://localhost:${PORT}            ║
+║  Health:       http://localhost:${PORT}/api/health  ║
+║  Personas:     http://localhost:${PORT}/api/personas ║
+║  Chat SSE:     POST http://localhost:${PORT}/api/chat ║
+╠════════════════════════════════════════════════╣
+║  Heartbeat:    ${HEARTBEAT_INTERVAL}ms                         ║
+║  SDK:          @anthropic-ai/sdk              ║
+╚════════════════════════════════════════════════╝
+  `);
+});
+
+// 全局错误处理
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled rejection at:', promise, 'reason:', reason);
+});

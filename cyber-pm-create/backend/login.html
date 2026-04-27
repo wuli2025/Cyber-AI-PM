@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - AI产品思维实验室</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 40px 30px;
+      text-align: center;
+      color: white;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid #eee;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 15px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 14px;
+      color: #666;
+      transition: all 0.3s;
+    }
+
+    .tab.active {
+      color: #667eea;
+      border-bottom: 2px solid #667eea;
+    }
+
+    .form-container {
+      padding: 30px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px 15px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 15px;
+      transition: border-color 0.3s;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-secondary {
+      background: #f5f5f5;
+      color: #333;
+      margin-top: 10px;
+    }
+
+    .btn-secondary:hover {
+      background: #eee;
+    }
+
+    .code-group {
+      display: flex;
+      gap: 10px;
+    }
+
+    .code-group input {
+      flex: 1;
+    }
+
+    .code-group button {
+      padding: 12px 15px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #f5f5f5;
+      cursor: pointer;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .code-group button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .message {
+      padding: 12px 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      display: none;
+    }
+
+    .message.error {
+      background: #fee;
+      color: #c33;
+      border: 1px solid #fcc;
+      display: block;
+    }
+
+    .message.success {
+      background: #efe;
+      color: #3c3;
+      border: 1px solid #cfc;
+      display: block;
+    }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .sub-panel { display: none; }
+    .sub-panel.active { display: block; }
+
+    .footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 12px;
+      color: #999;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      border-top-color: transparent;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>AI产品思维实验室</h1>
+      <p>与顶尖产品经理对话，激发无限灵感</p>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="login">登录</div>
+      <div class="tab" data-tab="register">注册</div>
+    </div>
+
+    <div class="form-container">
+      <!-- 登录面板 -->
+      <div class="panel active" id="login-panel">
+        <div class="message" id="login-message"></div>
+
+        <div class="tabs" style="margin-bottom: 20px; border: none;">
+          <div class="tab active" data-subtab="code">验证码登录</div>
+          <div class="tab" data-subtab="password">密码登录</div>
+        </div>
+
+        <!-- 验证码登录 -->
+        <div class="sub-panel active" id="login-code-panel">
+          <div class="form-group">
+            <label>邮箱地址</label>
+            <input type="email" id="login-email" placeholder="请输入邮箱">
+          </div>
+          <div class="form-group">
+            <label>验证码</label>
+            <div class="code-group">
+              <input type="text" id="login-code" placeholder="请输入验证码" maxlength="6">
+              <button type="button" id="send-login-code">发送验证码</button>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="login-with-code-btn">登录</button>
+        </div>
+
+        <!-- 密码登录 -->
+        <div class="sub-panel" id="login-password-panel">
+          <div class="form-group">
+            <label>邮箱地址</label>
+            <input type="email" id="login-pwd-email" placeholder="请输入邮箱">
+          </div>
+          <div class="form-group">
+            <label>密码</label>
+            <input type="password" id="login-pwd-password" placeholder="请输入密码">
+          </div>
+          <button class="btn btn-primary" id="login-with-pwd-btn">登录</button>
+          <button class="btn btn-secondary" id="forgot-pwd-btn">忘记密码</button>
+        </div>
+      </div>
+
+      <!-- 注册面板 -->
+      <div class="panel" id="register-panel">
+        <div class="message" id="register-message"></div>
+
+        <div class="form-group">
+          <label>邮箱地址</label>
+          <input type="email" id="reg-email" placeholder="请输入邮箱">
+        </div>
+        <div class="form-group">
+          <label>密码（至少6位）</label>
+          <input type="password" id="reg-password" placeholder="请设置密码">
+        </div>
+        <div class="form-group">
+          <label>验证码</label>
+          <div class="code-group">
+            <input type="text" id="reg-code" placeholder="请输入验证码" maxlength="6">
+            <button type="button" id="send-reg-code">发送验证码</button>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="register-btn">注册</button>
+      </div>
+
+      <!-- 找回密码面板 -->
+      <div class="panel" id="reset-panel">
+        <div class="message" id="reset-message"></div>
+
+        <div class="form-group">
+          <label>邮箱地址</label>
+          <input type="email" id="reset-email" placeholder="请输入注册邮箱">
+        </div>
+        <div class="form-group">
+          <label>新密码（至少6位）</label>
+          <input type="password" id="reset-password" placeholder="请输入新密码">
+        </div>
+        <div class="form-group">
+          <label>验证码</label>
+          <div class="code-group">
+            <input type="text" id="reset-code" placeholder="请输入验证码" maxlength="6">
+            <button type="button" id="send-reset-code">发送验证码</button>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="reset-btn">重置密码</button>
+        <button class="btn btn-secondary" id="back-to-login">返回登录</button>
+      </div>
+    </div>
+
+    <div class="footer">
+      登录即表示同意我们的服务条款和隐私政策
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let countdown = 0;
+    let countdownTimer = null;
+
+    // Token存储
+    function saveToken(token) {
+      localStorage.setItem('auth_token', token);
+    }
+
+    function getToken() {
+      return localStorage.getItem('auth_token');
+    }
+
+    function clearToken() {
+      localStorage.removeItem('auth_token');
+    }
+
+    // 已经有token，直接跳转
+    if (getToken()) {
+      window.location.href = '/';
+    }
+
+    // 消息提示
+    function showMessage(elementId, message, type = 'error') {
+      const el = document.getElementById(elementId);
+      el.textContent = message;
+      el.className = `message ${type}`;
+      setTimeout(() => {
+        el.className = 'message';
+      }, 5000);
+    }
+
+    // 倒计时
+    function startCountdown(buttonId, seconds = 60) {
+      countdown = seconds;
+      const btn = document.getElementById(buttonId);
+      btn.disabled = true;
+      btn.textContent = `${countdown}秒后重试`;
+
+      countdownTimer = setInterval(() => {
+        countdown--;
+        btn.textContent = `${countdown}秒后重试`;
+        if (countdown <= 0) {
+          clearInterval(countdownTimer);
+          btn.disabled = false;
+          btn.textContent = '发送验证码';
+        }
+      }, 1000);
+    }
+
+    // API请求
+    async function apiRequest(url, method, body) {
+      const options = {
+        method,
+        headers: { 'Content-Type': 'application/json' }
+      };
+
+      const token = getToken();
+      if (token) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+
+      const response = await fetch(`${API_BASE}${url}`, options);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || '请求失败');
+      }
+
+      return data;
+    }
+
+    // Tab切换
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const parent = tab.parentElement;
+        parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        const tabName = tab.dataset.tab;
+        if (tabName) {
+          document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+          document.getElementById(`${tabName}-panel`).classList.add('active');
+        }
+
+        const subTabName = tab.dataset.subtab;
+        if (subTabName) {
+          const subPanels = parent.parentElement.querySelectorAll('.sub-panel');
+          subPanels.forEach(p => p.classList.remove('active'));
+          document.getElementById(`login-${subTabName}-panel`).classList.add('active');
+        }
+      });
+    });
+
+    // 发送注册验证码
+    document.getElementById('send-reg-code').addEventListener('click', async () => {
+      const email = document.getElementById('reg-email').value.trim();
+      if (!email) {
+        showMessage('register-message', '请输入邮箱地址');
+        return;
+      }
+
+      try {
+        await apiRequest('/api/auth/send-register-code', 'POST', { email });
+        showMessage('register-message', '验证码已发送到您的邮箱', 'success');
+        startCountdown('send-reg-code');
+      } catch (e) {
+        showMessage('register-message', e.message);
+      }
+    });
+
+    // 注册
+    document.getElementById('register-btn').addEventListener('click', async () => {
+      const email = document.getElementById('reg-email').value.trim();
+      const password = document.getElementById('reg-password').value;
+      const code = document.getElementById('reg-code').value.trim();
+
+      if (!email || !password || !code) {
+        showMessage('register-message', '请填写完整信息');
+        return;
+      }
+
+      try {
+        const data = await apiRequest('/api/auth/register', 'POST', { email, password, code });
+        saveToken(data.token);
+        showMessage('register-message', '注册成功，正在跳转...', 'success');
+        setTimeout(() => window.location.href = '/', 1000);
+      } catch (e) {
+        showMessage('register-message', e.message);
+      }
+    });
+
+    // 发送登录验证码
+    document.getElementById('send-login-code').addEventListener('click', async () => {
+      const email = document.getElementById('login-email').value.trim();
+      if (!email) {
+        showMessage('login-message', '请输入邮箱地址');
+        return;
+      }
+
+      try {
+        await apiRequest('/api/auth/send-login-code', 'POST', { email });
+        showMessage('login-message', '验证码已发送到您的邮箱', 'success');
+        startCountdown('send-login-code');
+      } catch (e) {
+        showMessage('login-message', e.message);
+      }
+    });
+
+    // 验证码登录
+    document.getElementById('login-with-code-btn').addEventListener('click', async () => {
+      const email = document.getElementById('login-email').value.trim();
+      const code = document.getElementById('login-code').value.trim();
+
+      if (!email || !code) {
+        showMessage('login-message', '请填写完整信息');
+        return;
+      }
+
+      try {
+        const data = await apiRequest('/api/auth/login-with-code', 'POST', { email, code });
+        saveToken(data.token);
+        showMessage('login-message', '登录成功，正在跳转...', 'success');
+        setTimeout(() => window.location.href = '/', 1000);
+      } catch (e) {
+        showMessage('login-message', e.message);
+      }
+    });
+
+    // 密码登录
+    document.getElementById('login-with-pwd-btn').addEventListener('click', async () => {
+      const email = document.getElementById('login-pwd-email').value.trim();
+      const password = document.getElementById('login-pwd-password').value;
+
+      if (!email || !password) {
+        showMessage('login-message', '请填写完整信息');
+        return;
+      }
+
+      try {
+        const data = await apiRequest('/api/auth/login-with-password', 'POST', { email, password });
+        saveToken(data.token);
+        showMessage('login-message', '登录成功，正在跳转...', 'success');
+        setTimeout(() => window.location.href = '/', 1000);
+      } catch (e) {
+        showMessage('login-message', e.message);
+      }
+    });
+
+    // 忘记密码
+    document.getElementById('forgot-pwd-btn').addEventListener('click', () => {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('reset-panel').classList.add('active');
+    });
+
+    document.getElementById('back-to-login').addEventListener('click', () => {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('login-panel').classList.add('active');
+    });
+
+    // 发送重置验证码
+    document.getElementById('send-reset-code').addEventListener('click', async () => {
+      const email = document.getElementById('reset-email').value.trim();
+      if (!email) {
+        showMessage('reset-message', '请输入邮箱地址');
+        return;
+      }
+
+      try {
+        await apiRequest('/api/auth/send-reset-code', 'POST', { email });
+        showMessage('reset-message', '验证码已发送到您的邮箱', 'success');
+        startCountdown('send-reset-code');
+      } catch (e) {
+        showMessage('reset-message', e.message);
+      }
+    });
+
+    // 重置密码
+    document.getElementById('reset-btn').addEventListener('click', async () => {
+      const email = document.getElementById('reset-email').value.trim();
+      const newPassword = document.getElementById('reset-password').value;
+      const code = document.getElementById('reset-code').value.trim();
+
+      if (!email || !newPassword || !code) {
+        showMessage('reset-message', '请填写完整信息');
+        return;
+      }
+
+      try {
+        await apiRequest('/api/auth/reset-password', 'POST', { email, newPassword, code });
+        showMessage('reset-message', '密码重置成功，请使用新密码登录', 'success');
+        setTimeout(() => {
+          document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+          document.getElementById('login-panel').classList.add('active');
+        }, 2000);
+      } catch (e) {
+        showMessage('reset-message', e.message);
+      }
+    });
+  </script>
+</body>
+</html>

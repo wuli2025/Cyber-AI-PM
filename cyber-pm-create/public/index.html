@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 产品思维实验室</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- ===== 前后端分离：所有配置从后端 /api/config 获取 ===== -->
+    <script>
+      // ========== 1. 后端入口地址 ==========
+      const API_BASE_URL = window.API_CONFIG_BASE_URL || 'http://localhost:3011';
+
+      // ========== 2. 运行时状态 ==========
+      let _appConfig = null;
+      let _personaList = [];
+      let _personaMap = {};
+      let _configReady = null;
+
+      // ========== 3. 配置加载 ==========
+      async function loadConfig() {
+        if (_configReady) return _configReady;
+        _configReady = (async () => {
+          try {
+            const [configRes, personasRes] = await Promise.all([
+              fetch(`${API_BASE_URL}/api/config`).catch(() => null),
+              fetch(`${API_BASE_URL}/api/personas`).catch(() => null)
+            ]);
+
+            _appConfig = configRes?.ok ? await configRes.json() : {
+              wsURL: 'ws://localhost:3011',
+              wsToken: '',
+              useClaudeCode: false,
+              useSkillMode: false,
+              defaultMode: 'pro',
+              defaultPersona: 'yujun',
+              personaToSkill: {}
+            };
+
+            _personaList = personasRes?.ok ? await personasRes.json() : [];
+            _personaMap = {};
+            for (const p of _personaList) {
+              _personaMap[p.name] = p.id;
+            }
+
+            console.log('[Config] ✅ 配置加载完成', _appConfig);
+            console.log('[Config] 人格列表:', _personaList.length, '个');
+          } catch (e) {
+            console.error('[Config] ❌ 配置加载失败', e);
+            _appConfig = { wsURL: 'ws://localhost:3011', wsToken: '', useClaudeCode: false, useSkillMode: false, defaultMode: 'pro', defaultPersona: 'yujun', personaToSkill: {} };
+            _personaList = [];
+            _personaMap = {};
+          }
+        })();
+        return _configReady;
+      }
+
+      loadConfig();
+
+      // ========== 3.5 API_CONFIG（React 组件期望的全局配置）==========
+      window.API_CONFIG = {
+        mode: 'pro',
+        defaultMode: 'pro',
+        defaultPersona: 'yujun'
+      };
+
+      loadConfig().then(() => {
+        if (_appConfig) {
+          window.API_CONFIG = {
+            mode: _appConfig.defaultMode || 'pro',
+            defaultMode: _appConfig.defaultMode || 'pro',
+            defaultPersona: _appConfig.defaultPersona || 'yujun'
+          };
+          console.log('[API_CONFIG] 已同步:', window.API_CONFIG);
+        }
+      });
+
+      // ========== 4. WebSocket 客户端（Claude Code 终端模式）==========
+      window.ClaudeWS = (function() {
+        let ws = null;
+        let connecting = null;
+        let reconnectAttempts = 0;
+
+        async function connect() {
+          if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(ws);
+          if (connecting) return connecting;
+
+          await loadConfig();
+
+          connecting = new Promise((resolve, reject) => {
+            const cfg = _appConfig || { wsURL: 'ws://localhost:3011', wsToken: '' };
+            const url = cfg.wsToken ? `${cfg.wsURL}?token=${cfg.wsToken}` : cfg.wsURL;
+            console.log('[ClaudeWS] 🔌 连接中:', url);
+            const sock = new WebSocket(url);
+
+            const timeout = setTimeout(() => {
+              if (sock.readyState !== WebSocket.OPEN) {
+                sock.close();
+                reject(new Error('WebSocket connect timeout'));
+              }
+            }, 10000);
+
+            sock.onopen = () => {
+              clearTimeout(timeout);
+              ws = sock;
+              connecting = null;
+              reconnectAttempts = 0;
+              console.log('[ClaudeWS] ✅ 已连接');
+              resolve(ws);
+            };
+
+            sock.onclose = () => {
+              ws = null;
+              connecting = null;
+              if (reconnectAttempts < 5) {
+                reconnectAttempts++;
+                setTimeout(() => connect().catch(() => {}), 2000);
+              }
+            };
+
+            sock.onerror = () => {};
+          });
+
+          return connecting;
+        }
+
+        return { connect };
+      })();
+
+      // ========== 5. Chat API（MiniMax 后端）==========
+      window.ChatAPI = {
+        async sendMessage(message, persona_id, mode, history) {
+          await loadConfig();
+
+          let currentPersonaId = persona_id;
+          if (typeof currentPersonaId === 'object' && currentPersonaId !== null) {
+            currentPersonaId = currentPersonaId.id;
+          }
+          if (!currentPersonaId) currentPersonaId = _appConfig?.defaultPersona || 'yujun';
+
+          if (window.__SELECTED_PERSONA_ID__) {
+            currentPersonaId = window.__SELECTED_PERSONA_ID__;
+          }
+
+          const currentMode = mode || _appConfig?.defaultMode || 'pro';
+          console.log('[ChatAPI] 🎭 发送请求 - persona_id:', currentPersonaId, '| mode:', currentMode);
+
+          // 直接返回原始流，由 React 组件处理
+          // 添加 JWT token 到请求头
+          const authToken = localStorage.getItem('auth_token');
+          const headers = { 'Content-Type': 'application/json' };
+          if (authToken) {
+            headers['Authorization'] = `Bearer ${authToken}`;
+          }
+
+          const response = await fetch(`${API_BASE_URL}/api/chat`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+              message,
+              persona_id: currentPersonaId,
+              mode: currentMode,
+              history: history || []
+            })
+          });
+
+          // 未登录时跳转到登录页
+          if (response.status === 401) {
+            window.location.href = '/login';
+            throw new Error('Unauthorized');
+          }
+
+          if (!response.ok) throw new Error(`API Error: ${response.status}`);
+          return response.body;
+        },
+
+        async getPersonas() {
+          await loadConfig();
+          return _personaList.length > 0 ? [..._personaList] : fetch(`${API_BASE_URL}/api/personas`).then(r => r.json());
+        }
+      };
+
+      console.log('[ChatAPI] 初始化完成（MiniMax 模式）');
+
+      // ========== 6. 用户认证状态管理 ==========
+      window.UserAuth = {
+        getToken() {
+          return localStorage.getItem('auth_token');
+        },
+        setToken(token) {
+          localStorage.setItem('auth_token', token);
+        },
+        clearToken() {
+          localStorage.removeItem('auth_token');
+        },
+        getUser() {
+          const user = localStorage.getItem('auth_user');
+          return user ? JSON.parse(user) : null;
+        },
+        setUser(user) {
+          localStorage.setItem('auth_user', JSON.stringify(user));
+        },
+        clearUser() {
+          localStorage.removeItem('auth_user');
+        },
+        isLoggedIn() {
+          return !!this.getToken();
+        },
+        logout() {
+          this.clearToken();
+          this.clearUser();
+          window.location.href = '/login';
+        }
+      };
+
+      // 渲染用户状态（Kimi风格）
+      function renderUserBadge() {
+        const existing = document.getElementById('user-badge');
+        if (existing) existing.remove();
+        const menuExisting = document.getElementById('user-menu');
+        if (menuExisting) menuExisting.remove();
+
+        const avatarUrl = './avatar.png';
+
+        if (window.UserAuth.isLoggedIn()) {
+          const user = window.UserAuth.getUser();
+          const emailShort = user?.email?.split('@')[0] || '用户';
+
+          const html = '<div id="user-badge" style="position: fixed; bottom: 24px; left: 24px; z-index: 9999; cursor: pointer;" onclick="toggleUserMenu()">' +
+            '<div style="display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: linear-gradient(135deg, #5B8DEF 0%, #7B68EE 100%); border-radius: 24px; box-shadow: 0 4px 16px rgba(91,141,239,0.25);">' +
+            '<img src="' + avatarUrl + '" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" />' +
+            '<span style="color: white; font-size: 14px; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + emailShort + '</span>' +
+            '<span style="color: rgba(255,255,255,0.7); font-size: 12px;">▼</span>' +
+            '</div></div>' +
+            '<div id="user-menu" style="display: none; position: fixed; bottom: 80px; left: 24px; z-index: 9999; background: white; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); padding: 8px 0; min-width: 160px;">' +
+            '<div style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0;">' +
+            '<div style="color: #333; font-size: 14px; font-weight: 500;">' + emailShort + '</div>' +
+            '<div style="color: #999; font-size: 12px; margin-top: 2px;">' + user?.email + '</div>' +
+            '</div>' +
+            '<div style="padding: 12px 16px; color: #e74c3c; font-size: 14px; cursor: pointer;" onclick="window.UserAuth.logout()">退出登录</div>' +
+            '</div>';
+
+          document.body.insertAdjacentHTML('beforeend', html);
+        } else {
+          const html = '<div id="user-badge" style="position: fixed; bottom: 24px; left: 24px; z-index: 9999; cursor: pointer;" onclick="window.location.href=\'/login\'">' +
+            '<div style="display: flex; align-items: center; gap: 10px; padding: 10px 20px; background: white; border-radius: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); border: 1px solid #e8e8e8;">' +
+            '<img src="' + avatarUrl + '" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" />' +
+            '<span style="color: #333; font-size: 14px; font-weight: 500;">登录 / 注册</span>' +
+            '</div></div>';
+
+          document.body.insertAdjacentHTML('beforeend', html);
+        }
+      }
+
+      function toggleUserMenu() {
+        const menu = document.getElementById('user-menu');
+        if (menu) {
+          menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        }
+      }
+
+      // 页面加载后渲染用户状态
+      function initUserBadge() {
+        // 等待React渲染完成
+        const checkAndRender = () => {
+          if (document.getElementById('root')?.children.length > 0) {
+            renderUserBadge();
+          } else {
+            setTimeout(checkAndRender, 200);
+          }
+        };
+        checkAndRender();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initUserBadge);
+      } else {
+        setTimeout(initUserBadge, 100);
+      }
+
+      // 点击其他地方关闭菜单
+      document.addEventListener('click', function(e) {
+        const menu = document.getElementById('user-menu');
+        const badge = document.getElementById('user-badge');
+        if (menu && badge && !badge.contains(e.target) && !menu.contains(e.target)) {
+          menu.style.display = 'none';
+        }
+      });
+
+      console.log('[UserAuth] 用户认证模块已加载');
+    </script>
+
+    <!-- 智能滚动控制 -->
+    <script>
+      (function() {
+        let isAtBottom = true;
+        let scrollContainer = null;
+
+        function findScrollContainer() {
+          if (scrollContainer) return scrollContainer;
+          const divs = document.querySelectorAll('div');
+          for (const div of divs) {
+            const style = window.getComputedStyle(div);
+            if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+              if (div.scrollHeight > div.clientHeight + 100) {
+                scrollContainer = div;
+                break;
+              }
+            }
+          }
+          return scrollContainer;
+        }
+
+        function checkIsAtBottom() {
+          const container = findScrollContainer();
+          if (!container) {
+            const scrollTop = window.scrollY || document.documentElement.scrollTop;
+            const scrollHeight = document.documentElement.scrollHeight;
+            const clientHeight = window.innerHeight;
+            isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+            return;
+          }
+          isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+        }
+
+        function setupScrollListener() {
+          const container = findScrollContainer();
+          if (container) {
+            container.addEventListener('scroll', checkIsAtBottom, { passive: true });
+          }
+          window.addEventListener('scroll', checkIsAtBottom, { passive: true });
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', setupScrollListener);
+        } else {
+          setTimeout(setupScrollListener, 500);
+        }
+
+        const originalScrollIntoView = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function(options) {
+          checkIsAtBottom();
+          if (isAtBottom) {
+            return originalScrollIntoView.call(this, options);
+          }
+          showScrollHint();
+        };
+
+        let scrollHintEl = null;
+        function showScrollHint() {
+          if (scrollHintEl) return;
+          scrollHintEl = document.createElement('div');
+          scrollHintEl.innerHTML = '↓ 有新消息';
+          scrollHintEl.style.cssText = `
+            position: fixed; bottom: 100px; right: 24px;
+            background: rgba(102,126,234,0.9); color: white;
+            padding: 8px 16px; border-radius: 20px; font-size: 13px;
+            cursor: pointer; z-index: 9999; animation: pulse 2s infinite;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          `;
+          scrollHintEl.onclick = function() {
+            isAtBottom = true;
+            const container = findScrollContainer();
+            if (container) {
+              container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            } else {
+              window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+            }
+            scrollHintEl.remove();
+            scrollHintEl = null;
+          };
+          document.body.appendChild(scrollHintEl);
+        }
+
+        document.addEventListener('click', function(e) {
+          let target = e.target;
+          for (let i = 0; i < 5 && target; i++) {
+            const text = (target.textContent || '').trim();
+            if (text.length < 10) {
+              for (const [name, id] of Object.entries(_personaMap || {})) {
+                if (text === name || text.includes(name)) {
+                  window.__SELECTED_PERSONA_ID__ = id;
+                  console.log('🎯 [人格选择]', name, '→', id);
+                  return;
+                }
+              }
+            }
+            target = target.parentElement;
+          }
+        }, true);
+
+        console.log('[ScrollControl] 智能滚动已启用');
+      })();
+    </script>
+
+    <!-- xterm.js for embedded terminal -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+
+    <script type="module" crossorigin src="./assets/index-BmnAfbU3.js?v=20240426"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-HBweW0_q.css?v=20240426">
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- 覆盖分享按钮为"写入终极方案"                    -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <script>
+    // 直接注入样式
+    (function() {
+      const style = document.createElement('style');
+      style.textContent = `
+        .write-final-btn {
+          background: linear-gradient(135deg, #d67457 0%, #b85c3f 100%) !important;
+          color: white !important;
+          border: none !important;
+          border-radius: 6px !important;
+          padding: 4px 8px !important;
+          font-size: 12px !important;
+          cursor: pointer !important;
+        }
+        .write-final-btn:hover {
+          transform: scale(1.05);
+          box-shadow: 0 2px 8px rgba(214, 116, 87, 0.4);
+        }
+        .write-final-btn.done {
+          background: #22c55e !important;
+        }
+      `;
+      document.head.appendChild(style);
+
+      // 全局写入函数
+      window.__writeToFinalSolution = function(content) {
+        // 1. 找到右侧栏的 textarea
+        const textarea = document.querySelector('textarea');
+        if (textarea) {
+          textarea.value = content;
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+
+          // 2. 展开右侧栏（找展开按钮）
+          const allButtons = document.querySelectorAll('button');
+          allButtons.forEach(btn => {
+            const text = btn.textContent || btn.innerText || '';
+            if (text.includes('终极方案') && btn.offsetWidth > 0) {
+              btn.click();
+            }
+          });
+
+          return true;
+        }
+        return false;
+      };
+
+      // 修改分享按钮
+      function patchShareButton() {
+        document.querySelectorAll('button[title="分享"]').forEach(btn => {
+          if (btn.dataset.patched) return;
+          btn.dataset.patched = 'true';
+
+          // 修改样式
+          btn.classList.add('write-final-btn');
+          btn.title = '写入终极方案';
+
+          // 保存原onclick
+          const originalClick = btn.onclick;
+
+          // 绑定新点击
+          btn.onclick = function(e) {
+            // 找到AI消息内容
+            const bubble = btn.closest('[class*="flex"]')?.closest('[class*="rounded"]')?.closest('[class*="bubble"]') ||
+                        btn.closest('[class*="flex-col"]')?.querySelector('[class*="whitespace"]') ||
+                        btn.closest('[class*="message"]');
+
+            let content = '';
+            if (bubble) {
+              // 过滤掉按钮本身的文本
+              const btnsInBubble = bubble.querySelectorAll('button');
+              content = bubble.cloneNode(true);
+              btnsInBubble.forEach(b => content.removeChild(b));
+              content = content.innerText || content.textContent || '';
+            }
+
+            if (!content.trim()) {
+              alert('没有内容可以写入');
+              return;
+            }
+
+            // 写入右侧栏
+            const success = window.__writeToFinalSolution(content);
+
+            if (success) {
+              // 视觉反馈
+              btn.classList.add('done');
+              btn.title = '已写入 ✓';
+
+              // Toast
+              const toast = document.createElement('div');
+              toast.textContent = '✓ 已写入终极方案';
+              toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#22c55e;color:white;padding:10px 24px;border-radius:8px;font-size:14px;z-index:10000;';
+              document.body.appendChild(toast);
+              setTimeout(() => toast.remove(), 2000);
+
+              setTimeout(() => {
+                btn.classList.remove('done');
+                btn.title = '写入终极方案';
+              }, 3000);
+            }
+          };
+        });
+      }
+
+      // 持续监控
+      setInterval(patchShareButton, 500);
+      patchShareButton();
+    })();
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- Claude Code 嵌入式终端面板                          -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div id="claude-terminal-panel" style="
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 0;
+      background: #0c0c0c;
+      border-top: 2px solid #333;
+      z-index: 9998;
+      display: flex;
+      flex-direction: column;
+      transition: height 0.3s ease;
+      font-family: Consolas, 'Courier New', monospace;
+    ">
+      <!-- 拖拽调整高度的手柄 -->
+      <div id="terminal-resize-handle" style="
+        height: 6px;
+        background: #333;
+        cursor: ns-resize;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      " title="拖拽调整高度">
+        <div style="width: 40px; height: 3px; background: #666; border-radius: 2px;"></div>
+      </div>
+
+      <!-- 终端工具栏 -->
+      <div style="
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 12px;
+        background: #1a1a1a;
+        border-bottom: 1px solid #333;
+        flex-shrink: 0;
+        font-size: 12px;
+      ">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="color: #0dbc79; font-weight: bold;">●</span>
+          <span style="color: #ccc;">Claude Code 终端</span>
+          <span id="terminal-status" style="color: #666; font-size: 11px;">连接中...</span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button id="term-btn-clear" style="
+            background: #333; color: #ccc; border: none;
+            padding: 2px 10px; border-radius: 3px;
+            font-size: 11px; cursor: pointer;
+          ">清屏</button>
+          <button id="term-btn-restart" style="
+            background: #333; color: #ccc; border: none;
+            padding: 2px 10px; border-radius: 3px;
+            font-size: 11px; cursor: pointer;
+          ">重启</button>
+          <button id="term-btn-close" style="
+            background: #333; color: #ccc; border: none;
+            padding: 2px 10px; border-radius: 3px;
+            font-size: 11px; cursor: pointer;
+          ">关闭</button>
+        </div>
+      </div>
+
+      <!-- 终端容器 -->
+      <div id="terminal-container" style="flex: 1; overflow: hidden; padding: 4px;"></div>
+    </div>
+
+    <!-- 终端切换按钮（浮动） -->
+    <button id="claude-terminal-toggle" style="
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+      background: linear-gradient(135deg, #d67457 0%, #b85c3f 100%);
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 24px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+      <span>⚡</span>
+      <span>Claude Code</span>
+    </button>
+
+    <script>
+    (function() {
+      // ─── 配置 ───
+      const WS_URL = 'ws://localhost:3011';
+      const DEFAULT_HEIGHT = 350;
+      const MIN_HEIGHT = 150;
+      const MAX_HEIGHT = window.innerHeight * 0.8;
+
+      // ─── DOM 元素 ───
+      const panel = document.getElementById('claude-terminal-panel');
+      const container = document.getElementById('terminal-container');
+      const toggleBtn = document.getElementById('claude-terminal-toggle');
+      const resizeHandle = document.getElementById('terminal-resize-handle');
+      const statusEl = document.getElementById('terminal-status');
+
+      let isOpen = false;
+      let isConnected = false;
+      let ws = null;
+      let term = null;
+      let fitAddon = null;
+      let resizeTimeout = null;
+
+      // ─── 初始化 xterm.js ───
+      function initTerminal() {
+        if (term) return;
+
+        term = new Terminal({
+          cursorBlink: true,
+          fontSize: 13,
+          fontFamily: 'Consolas, "Courier New", "DejaVu Sans Mono", monospace',
+          theme: {
+            background: '#0c0c0c',
+            foreground: '#cccccc',
+            cursor: '#cccccc',
+            selectionBackground: '#264f78'
+          },
+          scrollback: 5000,
+          allowProposedApi: true,
+          convertEol: true
+        });
+
+        fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(container);
+
+        term.onData((data) => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'input', content: data }));
+          }
+        });
+
+        window.addEventListener('resize', () => {
+          clearTimeout(resizeTimeout);
+          resizeTimeout = setTimeout(() => {
+            if (fitAddon && isOpen) fitAddon.fit();
+            sendResize();
+          }, 200);
+        });
+      }
+
+      // ─── WebSocket 连接 ───
+      function connectWS() {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+        statusEl.textContent = '连接中...';
+        statusEl.style.color = '#f59e0b';
+
+        ws = new WebSocket(WS_URL);
+
+        ws.onopen = () => {
+          isConnected = true;
+          statusEl.textContent = '已连接';
+          statusEl.style.color = '#0dbc79';
+          console.log('[ClaudeTerminal] WebSocket 已连接');
+          setTimeout(sendResize, 300);
+        };
+
+        ws.onmessage = (ev) => {
+          if (!term) return;
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.content) {
+              term.write(msg.content);
+            }
+          } catch {
+            // 如果不是 JSON，直接写入原始数据
+            term.write(ev.data);
+          }
+        };
+
+        ws.onclose = () => {
+          isConnected = false;
+          statusEl.textContent = '已断开';
+          statusEl.style.color = '#ef4444';
+          ws = null;
+        };
+
+        ws.onerror = () => {
+          statusEl.textContent = '连接错误';
+          statusEl.style.color = '#ef4444';
+        };
+      }
+
+      function sendResize() {
+        if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+
+      function openPanel() {
+        initTerminal();
+        connectWS();
+        panel.style.height = DEFAULT_HEIGHT + 'px';
+        panel.style.borderTopColor = '#d67457';
+        toggleBtn.innerHTML = '<span>▼</span><span>隐藏终端</span>';
+        isOpen = true;
+        setTimeout(() => {
+          if (fitAddon) fitAddon.fit();
+          sendResize();
+        }, 350);
+      }
+
+      function closePanel() {
+        panel.style.height = '0';
+        panel.style.borderTopColor = '#333';
+        toggleBtn.innerHTML = '<span>⚡</span><span>Claude Code</span>';
+        isOpen = false;
+      }
+
+      function togglePanel() {
+        if (isOpen) closePanel();
+        else openPanel();
+      }
+
+      // ─── 事件绑定 ───
+      toggleBtn.addEventListener('click', togglePanel);
+      document.getElementById('term-btn-close').addEventListener('click', closePanel);
+      document.getElementById('term-btn-clear').addEventListener('click', () => { if (term) term.clear(); });
+      document.getElementById('term-btn-restart').addEventListener('click', () => {
+        if (ws) { ws.close(); }
+        setTimeout(() => { connectWS(); if (term) term.clear(); }, 500);
+      });
+
+      // ─── 拖拽调整高度 ───
+      let isDragging = false;
+      let startY = 0;
+      let startHeight = 0;
+
+      resizeHandle.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startY = e.clientY;
+        startHeight = panel.offsetHeight;
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const delta = startY - e.clientY;
+        const newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + delta));
+        panel.style.height = newHeight + 'px';
+        if (fitAddon) fitAddon.fit();
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          sendResize();
+        }
+      });
+
+      // ─── 快捷键：Ctrl/Cmd + ` 切换终端 ───
+      document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+          e.preventDefault();
+          togglePanel();
+        }
+      });
+
+      console.log('[ClaudeTerminal] 嵌入式终端面板已初始化');
+    })();
+    </script>
+  </body>
+</html>

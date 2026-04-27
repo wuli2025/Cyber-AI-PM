@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+*.log.*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+
+# Claude
+.claude/
+.claude/settings.local.json
+
+# Temporary
+temp-clone/
+tmp/
+*.tmp
+
+# Embedded repos
+**/.git/
