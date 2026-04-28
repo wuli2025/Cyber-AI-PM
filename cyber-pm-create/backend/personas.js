@@ -49,7 +49,7 @@ const PERSONA_CONFIG = {
     title: '战略思维大师',
     avatar: '毛',
     color: '#B22234',
-    skillPath: path.join(SKILL_BASE, '毛主席', 'mao-ze-dong-skill', 'SKILL.md')
+    skillPath: path.join(SKILL_BASE, '教员', 'SKILL.md')
   },
   default: {
     name: '默认模式',
